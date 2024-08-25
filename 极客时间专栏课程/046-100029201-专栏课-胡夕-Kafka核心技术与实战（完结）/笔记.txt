@@ -1,0 +1,55 @@
+18章笔记：
+1、kafka内存存在位移，保证单个消费者poll的位移顺序；提交是将内存位移提交到kafka中；宕机或重平衡时根据kafka的位移重新拉消息
+2、自动提交时，提交逻辑在poll方法中，auto.commit.interval.ms保证的是自动提交的最小间隔，可能会因为poll方法导致间隔变长
+3、参考示例中异步提交与同步提交结合的方法，异步提交的javadoc中说明了“通过多次调用此 API 提交的偏移量保证以与调用相同的顺序发送。相应的提交回调也以相同的顺序调用。此外，请注意，通过此 API 提交的偏移量保证在对 commitSync（） （和变体） 的后续调用返回之前完成。”
+
+19章笔记：
+CommitFailedException发生的两种场景，以及对应的解决办法：
+（1）消费者组已经开启了 Rebalance 过程，并且将要提交位移的分区分配给了另一个消费者实例。出现这个情况的原因是，你的消费者实例连续两次调用 poll 方法的时间间隔超过了期望的 max.poll.interval.ms 参数值。
+（2）应用中同时出现了设置相同 group.id 值的消费者组程序和独立消费者程序（Standalone Consumer），那么当独立消费者程序手动提交位移时，Kafka 就会立即抛出 CommitFailedException 异常，因为 Kafka 无法识别这个具有相同 group.id 的消费者实例，于是就向它返回一个错误，表明它不是消费者组内合法的成员。
+
+
+20章笔记：
+1、kafka消费端在poll时，会启两个线程分别负责 消费逻辑 与 连接协调者（分区重平衡与心跳），分别对应两个参数配置max.poll.interval.ms和session.timeout.ms，都表示何时将消费者踢出消费者组
+2、消费者读线程消费的两种方案
+
+21章笔记：
+consumer在poll时，才会与Broker建立TCP连接；建立的连接分为三类（1）连接负载最小的Broker确定协调者和获取集群元数据、（2）连接协调者，令其执行组成员管理操作，kafka与协调者进行分区协调以及心跳就是通过这个连接、（3）执行实际的消息获取；
+连接关闭时机：第三类创建好后，废除第一类连接，每次poll在第二和第三类连接上请求；手动关闭或者connection.max.idle.ms参数控制自动关闭 TCP连接
+
+22章笔记：
+消费者消费进度监控的三种方法：
+（1）使用 Kafka 自带的命令行工具 kafka-consumer-groups 脚本。
+（2）使用 Kafka Java Consumer API 编程。
+（3）使用 Kafka 自带的 JMX 监控指标。
+问题：文中提到的“由于消费者的速度无法匹及生产者的速度，极有可能导致它消费的数据已经不在操作系统的页缓存中了，那么这些数据就会失去享有 Zero Copy 技术的资格。这样的话，消费者就不得不从磁盘上读取它们，这就进一步拉大了与生产者的差距”，指的是从broker到消费端用不到Zero Copy了？为什么会用不到？
+
+23章笔记
+（1）副本的好处：（1）提供数据冗余；（2）提供高伸缩性；（3）改善数据局部性；由于kafka的follower不对外提供服务，因此只有第一种好处，但是能够保证 Read-your-writes 以及 单调读
+（2）副本本质就是一个只能追加写消息的提交日志
+（3）kafka用In-sync Replicas（ISR）记录了所有存活的副本（包括leader和follower副本；其中replica.lag.time.max.ms控制了follower的逐出），leader选举在ISR中进行；unclean.leader.election.enable 控制是否允许 Unclean(即不在ISR中的副本) 领导者选举（ISR中无副本时）
+
+
+24章笔记
+1、Broker端处理网络请求的方式：Reactor模式（请求分发  与 请求处理 解耦）；分为 分发线程 + 网络线程池（请求入队列&发送Responese）+ IO线程池（执行IO处理）+ Purgatory（缓存未满足条件的请求）
+2、由于Broker存在线程池，消息的顺序需要由producer的client端把控（同一个分区的消息不并行发送&retry时控制max.in.flight.requests.per.connection=1）
+3、由于控制类请求可以直接令数据类请求失效，因此需要对控制类请求和数据类请求的处理隔离（两套上述机制）
+4、kafka使用的时JAVA的NIO，而非Netty，实现的Reactor
+
+25章笔记：
+1、重平衡触发的三个条件
+2、消费者组的重平衡状态机
+3、消费者端重平衡的两个步骤（JoinGroup - SyncGroup）；协调者端重平衡的四个场景
+
+26章笔记：
+1、控制器如何选举出来的 - 第一个成功在zookeeper创建 /controller 节点的 Broker 会被指定为控制器；通过JMX指标-activeController可以判断集群是否出现脑裂；
+2、控制器职责与保存的元数据；利用zookeeper的Watch机制自动侦测控制器状态，并进行重新选举控制器，并从zookeeper同步元数据
+3、控制器内部设计：多线程操作控制器缓存 - 》》单线程+事件队列，由单个线程去对控制器缓存进行维护，解耦控制器缓存的操作 与 具体处理逻辑
+问题：
+1 https://cwiki.apache.org/confluence/display/KAFKA/KIP-500%3A+Replace+ZooKeeper+with+a+Self-Managed+Metadata+Quorum，中提到了kaka去除zookeeper，可以看下是如何实现的
+2 参考一下https://wangjunfei.com/2021/12/01/Kafka%E5%8E%BBZookeeper%E6%8F%AD%E7%A7%98/
+
+27章笔记
+问题：
+1、ack=-1与HW更新的关系？
+2、epoch的作用 && 为什么要引入epoch
